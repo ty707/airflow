@@ -17,9 +17,11 @@ standard_library.install_aliases()
 from builtins import str
 import logging
 from queue import Queue
+from os import environ
 
 import mesos.interface
 from mesos.interface import mesos_pb2
+from mesos.interface.mesos_pb2 import ContainerInfo, Environment
 import mesos.native
 
 from airflow import configuration
@@ -149,8 +151,44 @@ class AirflowMesosScheduler(mesos.interface.Scheduler):
                 command = mesos_pb2.CommandInfo()
                 command.shell = True
                 command.value = cmd
-                task.command.MergeFrom(command)
 
+                # (Optional) Use the Docker Containerizer
+                if configuration.has_option('mesos', 'docker_image'):
+                    docker_image = configuration.get('mesos', 'docker_image')
+                    logging.info("Using docker image %s as a mesos container." % docker_image)
+                    docker = ContainerInfo.DockerInfo()
+                    docker.image = docker_image
+                    docker.privileged = True
+                    docker.force_pull_image = True
+                    container = ContainerInfo()
+                    container.type = 1
+                    container.docker.MergeFrom(docker)
+                    task.container.MergeFrom(container)
+
+                    # (Optional) Use mesos fetcher to provide docker config to the sandbox
+                    if configuration.has_option('mesos', 'docker_config_path'):
+                        docker_cfg_path = configuration.get('mesos', 'docker_config_path')
+                        logging.info("Using docker config at %s." % docker_cfg_path)
+                        docker_cfg_uri = command.URI()
+                        docker_cfg_uri.value = docker_cfg_path
+                        command.uris.extend([docker_cfg_uri])
+
+                # propagate all airflow env variables
+                env = Environment()
+                var_count = 0
+                vars = []
+                for (name, value) in environ.items():
+                    if name.startswith("AIRFLOW"):
+                        var = Environment.Variable()
+                        var.name = name
+                        var.value = value
+                        vars.append(var)
+                        var_count += 1
+                env.variables.extend(vars)
+                command.environment.MergeFrom(env)
+                logging.info("Propagated %s airflow env vars to mesos task" % var_count)
+
+                task.command.MergeFrom(command)
                 tasks.append(task)
 
                 remainingCpus -= self.task_cpu
