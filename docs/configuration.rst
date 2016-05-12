@@ -168,10 +168,17 @@ steps -
 1. Install airflow on a machine where web server and scheduler will run,
    let's refer to this as the "Airflow server".
 2. On the Airflow server, install mesos python eggs from `mesos downloads <http://open.mesosphere.com/downloads/mesos/>`_.
+   (Note: You will need to follow the instructions `here <http://mesos.apache.org/gettingstarted/>`_, then you'll find
+   the eggs in ``[mesos_install_dir]/build/src/python/dist``)
 3. On the Airflow server, use a database (such as mysql) which can be accessed from mesos
    slave machines and add configuration in ``airflow.cfg``.
 4. Change your ``airflow.cfg`` to point executor parameter to
-   `MesosExecutor` and provide related Mesos settings.
+   ``MesosExecutor`` and provide related Mesos settings.
+
+As for allowing the slaves to run your airflow tasks, you have two options:
+
+**Pickling DAGs** -- requires installing airflow on all slaves
+
 5. On all mesos slaves, install airflow. Copy the ``airflow.cfg`` from
    Airflow server (so that it uses same sql alchemy connection).
 6. On all mesos slaves, run the following for serving logs:
@@ -184,9 +191,23 @@ steps -
 
 .. code-block:: bash
 
-    airflow scheduler -p
+    airflow scheduler -p # We need -p parameter to pickle the DAGs.
 
-Note: We need -p parameter to pickle the DAGs.
+**Mesos Docker Containerizer** -- requires installing docker on all slaves, and requires s3 for logging
+
+5. Follow the instructions `here <http://mesos.apache.org/documentation/latest/docker-containerizer/>`_ to ensure slaves are docker-ready.
+6. Set "docker_image" in ``airflow.cfg`` to a docker image with airflow
+   installed alongside your DAG folder (similar to the Airflow server).
+7. Set "docker_config_path" in ``airflow.cfg`` to a path the `Mesos Fetcher <http://mesos.apache.org/documentation/latest/fetcher/>`_
+   can use to access the respository containing your image.
+8. Set "s3_log_folder" in ``airflow.cfg`` to your desired s3 logging location.
+
+**Notes:**
+
+* It is highly suggested that any subdags explicitly use ``SequentialExecutor``.
+* Unless you set the variable ``LIBPROCESS_PORT`` in the scheduler's environment,
+  you will want to ensure *all* ephemeral ports on the Airflow Server are open to
+  your mesos scheduler.
 
 You can now see the airflow framework and corresponding tasks in mesos UI.
 The logs for airflow tasks can be seen in airflow UI as usual.
